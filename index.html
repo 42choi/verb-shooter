@@ -91,6 +91,7 @@ body{
 .missmsg .m b{color:var(--bad)}
 .missmsg .w{font-family:var(--f-word);font-weight:900;font-size:clamp(18px,5vw,24px);color:var(--copper);margin-top:2px}
 @keyframes msgIn{from{opacity:0;transform:translateY(8px)}}
+.freeze[hidden]{display:none}
 .freeze{position:absolute;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;
   background:rgba(255,107,107,.16);box-shadow:inset 0 0 0 4px var(--bad);pointer-events:auto}
 .freeze span{font-family:var(--f-display);font-size:clamp(28px,8vw,44px);color:var(--bad);letter-spacing:.06em;
@@ -129,6 +130,7 @@ p{margin:0;line-height:1.6;color:var(--ink)}
 .stat{background:var(--board-2);border:1px solid var(--trace);border-radius:8px;padding:10px;text-align:center}
 .stat .n{font-family:var(--f-display);font-size:24px;font-variant-numeric:tabular-nums}
 .stat .t{font-size:12px;color:var(--muted)}
+.review[hidden]{display:none}
 .review{display:flex;flex-direction:column;gap:6px}
 .review .t{font-size:13px;color:var(--muted)}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
