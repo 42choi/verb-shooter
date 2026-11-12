@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // rankings/{studentId} — 문서 ID는 학번(숫자 4자리)
+    match /rankings/{studentId} {
+      allow read: if true;
+      allow delete: if false;
+
+      allow create: if isValidEntry(studentId, request.resource.data);
+
+      // 기존 기록이 있을 때는 새 점수가 더 높을 때만 덮어쓰기 허용
+      allow update: if isValidEntry(studentId, request.resource.data)
+                    && request.resource.data.score > resource.data.score;
+    }
+
+    function isValidEntry(studentId, data) {
+      return studentId.matches('^[0-9]{4}$')
+        && data.keys().hasOnly(['id', 'name', 'score', 'at'])
+        && data.id == studentId
+        && data.name is string
+        && data.name.size() >= 2 && data.name.size() <= 10
+        && data.score is int
+        && data.score >= -500 && data.score <= 1500;
+    }
+  }
+}

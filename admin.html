@@ -1,0 +1,132 @@
+<title>いちだん シューター · 교사용 랭킹 관리</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=IBM+Plex+Sans+KR:wght@400;600&display=swap">
+<style>
+:root{
+  --board:#0c1f1b; --board-2:#123029; --trace:#1d4a3f; --copper:#e0a458;
+  --ink:#eaf4ef; --muted:#8fb2a6; --bad:#ff6b6b; --good:#6fe08a;
+  --f-display:"Dela Gothic One",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  color-scheme:dark;
+}
+body{margin:0;background:var(--board);color:var(--ink);font-family:var(--f-body);min-height:100vh}
+.wrap{max-width:860px;margin:0 auto;padding:28px 20px 60px}
+h1{font-family:var(--f-display);font-weight:400;font-size:clamp(26px,6vw,36px);margin:0 0 4px}
+.sub{color:var(--muted);font-size:14px;margin:0 0 24px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+.btn{appearance:none;border:0;border-radius:8px;padding:12px 18px;font:600 15px var(--f-body);cursor:pointer;
+  background:var(--copper);color:#1b130a;box-shadow:0 3px 0 #8a5c26}
+.btn:active{translate:0 2px;box-shadow:0 1px 0 #8a5c26}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:none;border:1px solid var(--trace)}
+.count{color:var(--muted);font-size:14px;margin-left:auto}
+.status{color:var(--muted);font-size:14px;min-height:1.4em;margin-bottom:10px}
+.status.err{color:var(--bad)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;background:var(--board-2);border-radius:10px;overflow:hidden}
+th,td{padding:10px 12px;border-bottom:1px solid var(--trace);text-align:left;font-size:14px}
+th{font-size:12px;color:var(--muted);font-weight:400;letter-spacing:.06em}
+td.rk{font-family:var(--f-display);width:40px;color:var(--muted)}
+tr.top1 td.rk{color:var(--copper)}
+td.sc{text-align:right;font-family:var(--f-display)}
+td.at{color:var(--muted);font-size:12px}
+.empty{color:var(--muted);text-align:center;padding:24px 0}
+</style>
+
+<div class="wrap">
+  <h1>교사용 랭킹 관리</h1>
+  <p class="sub">いちだん シューター · rankings 컬렉션 전체 기록</p>
+  <div class="bar">
+    <button class="btn" id="btnRefresh" type="button">새로고침</button>
+    <button class="btn ghost" id="btnCsv" type="button">CSV 다운로드</button>
+    <span class="count" id="count"></span>
+  </div>
+  <div class="status" id="status"></div>
+  <table>
+    <thead><tr><th>순위</th><th>학번</th><th>이름</th><th style="text-align:right">점수</th><th>등록 시각</th></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAMOA78tCr1Rj2NTJp92dGMUfBAjFIvFcA",
+  authDomain: "shooting-game-dc474.firebaseapp.com",
+  projectId: "shooting-game-dc474",
+  storageBucket: "shooting-game-dc474.firebasestorage.app",
+  messagingSenderId: "302920082549",
+  appId: "1:302920082549:web:02ca13838f9fb9ebf4043c",
+  measurementId: "G-4Z49HT66KT"
+};
+const db = getFirestore(initializeApp(firebaseConfig));
+
+const $ = id => document.getElementById(id);
+let rows = [];
+
+function fmtDate(ms){
+  if (!ms) return '';
+  const d = new Date(ms);
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function load(){
+  $('status').className = 'status'; $('status').textContent = '불러오는 중…';
+  $('btnRefresh').disabled = true;
+  try {
+    const q = query(collection(db, 'rankings'), orderBy('score', 'desc'));
+    const snap = await getDocs(q);
+    rows = snap.docs.map(d => d.data());
+    render();
+    $('status').textContent = '';
+  } catch (e) {
+    $('status').className = 'status err';
+    $('status').textContent = '기록을 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.';
+  } finally {
+    $('btnRefresh').disabled = false;
+  }
+}
+
+function render(){
+  $('count').textContent = `전체 ${rows.length}명`;
+  const body = $('body');
+  if (!rows.length){ body.innerHTML = '<tr><td colspan="5" class="empty">등록된 기록이 없습니다.</td></tr>'; return; }
+  body.innerHTML = '';
+  rows.forEach((r,i) => {
+    const tr = document.createElement('tr');
+    if (i===0) tr.classList.add('top1');
+    tr.innerHTML = `<td class="rk">${i+1}</td><td></td><td></td><td class="sc">${r.score}</td><td class="at">${fmtDate(r.at)}</td>`;
+    tr.children[1].textContent = r.id; tr.children[2].textContent = r.name;
+    body.appendChild(tr);
+  });
+}
+
+function toCsvField(v){
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsv(){
+  if (!rows.length) return;
+  const header = ['순위','학번','이름','점수','등록시각'];
+  const lines = [header.join(',')];
+  rows.forEach((r,i) => {
+    lines.push([i+1, r.id, r.name, r.score, fmtDate(r.at)].map(toCsvField).join(','));
+  });
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = `verb-shooter-rankings-${stamp}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+$('btnRefresh').addEventListener('click', load);
+$('btnCsv').addEventListener('click', downloadCsv);
+load();
+</script>

@@ -1,0 +1,493 @@
+<title>いちだん シューター</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Maru+Gothic:wght@700;900&family=IBM+Plex+Sans+KR:wght@400;600&display=swap">
+<style>
+/* Layout: 한 화면 게임. 회로기판(PCB) 위로 칩처럼 떨어지는 동사를 하단 포탑에서 터치로 쏜다. 단일 다크 테마(의도적). */
+:root{
+  --board:#0c1f1b;      /* PCB 녹색 기판 */
+  --board-2:#123029;
+  --trace:#1d4a3f;      /* 회로 배선 */
+  --copper:#e0a458;     /* 구리 패드 · 강조 */
+  --laser:#7fe3ff;      /* 레이저 */
+  --ink:#eaf4ef;
+  --muted:#8fb2a6;
+  --chip:#17201e;       /* 칩 몸체 */
+  --good:#6fe08a;
+  --bad:#ff6b6b;
+  --f-display:"Dela Gothic One","Zen Maru Gothic",system-ui,sans-serif;
+  --f-word:"Zen Maru Gothic","Hiragino Maru Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{
+  background:var(--board);color:var(--ink);font-family:var(--f-body);
+  overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;overscroll-behavior:none;
+}
+#app{position:relative;height:100%;display:flex;flex-direction:column}
+/* 기판 무늬 */
+.pcb{
+  background-color:var(--board);
+  background-image:
+    radial-gradient(circle at 12px 12px, var(--trace) 2.5px, transparent 3px),
+    linear-gradient(90deg, transparent 47%, var(--trace) 47%, var(--trace) 49%, transparent 49%),
+    linear-gradient(0deg, transparent 72%, rgba(29,74,63,.55) 72%, rgba(29,74,63,.55) 73.5%, transparent 73.5%);
+  background-size:48px 48px, 192px 96px, 96px 144px;
+}
+
+/* 상단 HUD */
+.hud{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:10px;background:rgba(10,24,21,.92);border-bottom:2px solid var(--copper);
+  font-variant-numeric:tabular-nums;z-index:5;
+}
+.hud .lbl{font-size:11px;letter-spacing:.12em;color:var(--muted);display:block}
+.hud .val{font-family:var(--f-display);font-size:clamp(20px,5vw,28px);line-height:1.1}
+.hud .time.low .val{color:var(--bad)}
+.hud .combo{text-align:center;min-width:64px}
+.hud .combo .val{color:var(--copper)}
+.hud .score{text-align:right}
+.hud .miss{text-align:center;min-width:64px}
+.hud .miss.warn .val{color:var(--bad)}
+
+/* 게임 필드 */
+#field{position:relative;flex:1;overflow:hidden;touch-action:none}
+.word{
+  position:absolute;left:0;top:0;will-change:transform;cursor:pointer;
+  padding:10px 16px;border-radius:6px;background:var(--chip);
+  border:2px solid #2f4a43;color:var(--ink);
+  font-family:var(--f-word);font-weight:900;font-size:clamp(20px,5.4vw,28px);letter-spacing:.04em;white-space:nowrap;
+  box-shadow:0 0 0 3px rgba(12,31,27,.8), 0 4px 0 #0a1513;
+}
+/* 칩 다리 */
+.word::before,.word::after{
+  content:"";position:absolute;left:10px;right:10px;height:5px;
+  background:repeating-linear-gradient(90deg,var(--copper) 0 4px,transparent 4px 9px);opacity:.8;
+}
+.word::before{top:-7px}.word::after{bottom:-7px}
+.word.hit{animation:pop .28s ease-out forwards;border-color:var(--good)}
+.word.wrong{animation:shake .3s ease-out forwards;border-color:var(--bad);color:var(--bad)}
+@keyframes pop{to{opacity:0;scale:1.35}}
+@keyframes shake{0%,100%{translate:0}25%{translate:-6px}75%{translate:6px}}
+.beam{position:absolute;height:3px;background:var(--laser);transform-origin:0 50%;border-radius:2px;
+  box-shadow:0 0 10px var(--laser);pointer-events:none;animation:fade .18s ease-out forwards}
+@keyframes fade{to{opacity:0}}
+.float{position:absolute;font-family:var(--f-display);font-size:22px;pointer-events:none;animation:rise .8s ease-out forwards;translate:-50% 0}
+.float.plus{color:var(--good)}.float.minus{color:var(--bad)}
+@keyframes rise{to{opacity:0;transform:translateY(-44px)}}
+.deadline{position:absolute;left:0;right:0;bottom:64px;height:2px;
+  background:repeating-linear-gradient(90deg,var(--bad) 0 10px,transparent 10px 18px);opacity:.45;pointer-events:none}
+.deadline.flash{opacity:1;box-shadow:0 0 14px var(--bad)}
+.turret{position:absolute;left:50%;bottom:calc(10px + env(safe-area-inset-bottom,0px));translate:-50% 0;width:56px;height:44px;pointer-events:none}
+.turret svg{width:100%;height:100%}
+.missmsg{position:absolute;left:50%;bottom:84px;translate:-50% 0;z-index:3;pointer-events:none;
+  max-width:calc(100% - 32px);text-align:center;background:rgba(12,31,27,.92);border:2px solid var(--bad);border-radius:10px;
+  padding:10px 16px;animation:msgIn .18s ease-out}
+.missmsg .m{font:600 clamp(15px,4.2vw,19px) var(--f-body);color:var(--ink)}
+.missmsg .m b{color:var(--bad)}
+.missmsg .w{font-family:var(--f-word);font-weight:900;font-size:clamp(18px,5vw,24px);color:var(--copper);margin-top:2px}
+@keyframes msgIn{from{opacity:0;transform:translateY(8px)}}
+.freeze{position:absolute;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;
+  background:rgba(255,107,107,.16);box-shadow:inset 0 0 0 4px var(--bad);pointer-events:auto}
+.freeze span{font-family:var(--f-display);font-size:clamp(28px,8vw,44px);color:var(--bad);letter-spacing:.06em;
+  background:rgba(12,31,27,.85);padding:8px 18px;border-radius:8px}
+
+/* 오버레이 화면 */
+.screen{
+  position:absolute;inset:0;z-index:10;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  display:flex;flex-direction:column;align-items:center;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:28px 40px;background:rgba(9,22,19,.9);backdrop-filter:blur(2px);
+}
+.panel{width:100%;max-width:460px;display:flex;flex-direction:column;gap:18px}
+.eyebrow{font-size:12px;letter-spacing:.18em;color:var(--copper)}
+h1{font-family:var(--f-display);font-weight:400;font-size:clamp(34px,10vw,52px);line-height:1.05;margin:0;text-wrap:balance}
+h1 .jp{display:block;color:var(--copper)}
+h2{font-family:var(--f-display);font-weight:400;font-size:24px;margin:0}
+p{margin:0;line-height:1.6;color:var(--ink)}
+.rules{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;align-items:center;
+  background:var(--board-2);border:1px solid var(--trace);border-radius:8px;padding:14px 16px}
+.rules b{font-family:var(--f-display);font-weight:400;font-size:20px;text-align:right;font-variant-numeric:tabular-nums}
+.rules .g{color:var(--good)}.rules .r{color:var(--bad)}
+.hint{font-size:13px;color:var(--muted);line-height:1.6}
+.hint code{font-family:var(--f-word);color:var(--ink);font-weight:700}
+.btn{appearance:none;border:0;border-radius:8px;padding:16px 20px;font:600 18px var(--f-body);cursor:pointer;
+  background:var(--copper);color:#1b130a;box-shadow:0 4px 0 #8a5c26;touch-action:manipulation}
+.btn:active{translate:0 3px;box-shadow:0 1px 0 #8a5c26}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:none;border:1px solid var(--trace)}
+.btn:focus-visible,input:focus-visible{outline:3px solid var(--laser);outline-offset:2px}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1 1 140px}
+.count{font-family:var(--f-display);font-size:120px;color:var(--copper);margin:auto}
+
+.result-score{font-family:var(--f-display);font-size:72px;line-height:1;color:var(--copper);font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--board-2);border:1px solid var(--trace);border-radius:8px;padding:10px;text-align:center}
+.stat .n{font-family:var(--f-display);font-size:24px;font-variant-numeric:tabular-nums}
+.stat .t{font-size:12px;color:var(--muted)}
+.review{display:flex;flex-direction:column;gap:6px}
+.review .t{font-size:13px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{font-family:var(--f-word);font-weight:700;padding:4px 10px;border-radius:999px;font-size:16px;border:1px solid var(--trace);background:var(--board-2)}
+.chips.bad span{border-color:rgba(255,107,107,.5)}
+form{display:flex;flex-direction:column;gap:10px}
+label{font-size:13px;color:var(--muted)}
+input{width:100%;box-sizing:border-box;padding:14px;border-radius:8px;border:1px solid var(--trace);background:var(--chip);color:var(--ink);
+  font:600 18px var(--f-body);-webkit-user-select:text;user-select:text}
+.err{color:var(--bad);font-size:14px;min-height:1.2em}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+td,th{padding:9px 6px;border-bottom:1px solid var(--trace);text-align:left;font-size:15px}
+th{font-size:12px;color:var(--muted);font-weight:400;letter-spacing:.08em}
+td.rk{font-family:var(--f-display);width:36px;color:var(--muted)}
+tr.top1 td.rk{color:var(--copper)}
+td.sc{text-align:right;font-family:var(--f-display)}
+tr.me td{background:rgba(224,164,88,.14)}
+.empty{color:var(--muted);text-align:center;padding:18px 0}
+@media (prefers-reduced-motion:reduce){.word.hit,.word.wrong,.float,.beam{animation-duration:.01s}}
+</style>
+
+<div id="app" class="pcb">
+  <div class="hud">
+    <div class="time" id="timeBox"><span class="lbl">TIME</span><span class="val" id="time">2:00</span></div>
+    <div class="combo"><span class="lbl">COMBO</span><span class="val" id="combo">0</span></div>
+    <div class="miss" id="missBox"><span class="lbl">실수</span><span class="val" id="missCnt">0/15</span></div>
+    <div class="score"><span class="lbl">SCORE</span><span class="val" id="score">0</span></div>
+  </div>
+  <div id="field">
+    <div class="deadline" id="deadline"></div>
+    <div class="missmsg" id="missMsg" hidden><div class="m"><b>어이!</b> 1단동사 하나를 놓쳤잖아.</div><div class="w" id="missWord"></div></div>
+    <div class="freeze" id="freeze" hidden><span>정지!</span></div>
+    <div class="turret"><svg viewBox="0 0 56 44" aria-hidden="true">
+      <rect x="24" y="0" width="8" height="22" rx="2" fill="#7fe3ff"/>
+      <path d="M6 44 L10 22 Q28 10 46 22 L50 44 Z" fill="#e0a458"/>
+      <circle cx="28" cy="30" r="6" fill="#0c1f1b"/></svg></div>
+  </div>
+
+  <!-- 시작 -->
+  <section class="screen" id="sStart">
+    <div class="panel">
+      <span class="eyebrow">2학년 일본어 · 동사 활용 슈팅</span>
+      <h1>1단동사를<br><span class="jp">쏴라!</span></h1>
+      <p>떨어지는 동사 중 <strong>1단동사만</strong> 터치해서 쏘세요. 5단동사는 그냥 내려가게 두면 됩니다.</p>
+      <div class="rules">
+        <b class="g">+10</b><span>1단동사 명중 (5콤보부터 +15)</span>
+        <b class="r">−5</b><span>5단동사를 쏨 (1초 동안 화면 정지, 시간은 계속 흐름)</span>
+        <b class="r">−3</b><span>1단동사를 놓침 (빨간 선 통과)</span>
+        <b class="r">15</b><span>잘못 쏜거나 놓친 횟수가 합쳐서 15번이 되면 게임 종료</span>
+      </div>
+      <p class="hint">힌트: <code>る</code> 바로 앞 글자가 い단(い·き·し·み…)이나 え단(え·け·せ·べ…)이면 1단동사. 뜻을 몰라도 규칙만 알면 맞힐 수 있어요. 제한시간 2분, 시간이 갈수록 빨라집니다. 막 쏘면 실수가 쌓여 일찍 끝날 수 있어요.</p>
+      <button class="btn" id="btnStart" type="button">시작하기</button>
+      <button class="btn ghost" id="btnRankFromStart" type="button">랭킹 보기</button>
+    </div>
+  </section>
+
+  <section class="screen" id="sCount" hidden><div class="count" id="countNum">3</div></section>
+
+  <!-- 결과 -->
+  <section class="screen" id="sResult" hidden>
+    <div class="panel">
+      <span class="eyebrow" id="rReason">TIME UP · 결과</span>
+      <div class="result-score" id="rScore">0</div>
+      <div class="stats">
+        <div class="stat"><div class="n" id="rHit">0</div><div class="t">명중</div></div>
+        <div class="stat"><div class="n" id="rWrong">0</div><div class="t">잘못 쏨</div></div>
+        <div class="stat"><div class="n" id="rMiss">0</div><div class="t">놓침</div></div>
+      </div>
+      <div class="review" id="reviewWrong" hidden><span class="t">쏘면 안 됐던 5단동사</span><div class="chips bad" id="listWrong"></div></div>
+      <div class="review" id="reviewMiss" hidden><span class="t">놓친 1단동사</span><div class="chips" id="listMiss"></div></div>
+      <form id="saveForm" novalidate>
+        <h2>기록 등록</h2>
+        <label for="inId">학번 (숫자 4자리, 예: 2601)</label>
+        <input id="inId" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="2601">
+        <label for="inName">이름</label>
+        <input id="inName" autocomplete="off" maxlength="10" placeholder="홍길동">
+        <div class="err" id="err"></div>
+        <button class="btn" type="submit">점수 등록하고 랭킹 보기</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- 랭킹 -->
+  <section class="screen" id="sRank" hidden>
+    <div class="panel">
+      <span class="eyebrow">2학년 통합 랭킹</span>
+      <h2>TOP 10</h2>
+      <table><thead><tr><th>순위</th><th>학번</th><th>이름</th><th style="text-align:right">점수</th></tr></thead>
+        <tbody id="rankBody"></tbody></table>
+      <div class="row">
+        <button class="btn" id="btnAgain" type="button">다시 하기</button>
+        <button class="btn ghost" id="btnHome" type="button">처음으로</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {
+  getFirestore, doc, runTransaction,
+  collection, query, orderBy, limit, getDocs
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAMOA78tCr1Rj2NTJp92dGMUfBAjFIvFcA",
+  authDomain: "shooting-game-dc474.firebaseapp.com",
+  projectId: "shooting-game-dc474",
+  storageBucket: "shooting-game-dc474.firebasestorage.app",
+  messagingSenderId: "302920082549",
+  appId: "1:302920082549:web:02ca13838f9fb9ebf4043c",
+  measurementId: "G-4Z49HT66KT"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+
+(() => {
+// ── 단어 데이터 (예외 5단동사·히라가나 표기가 겹치는 동사 제외, 규칙 검증 완료) ──
+const ICHI = `たべる みる おきる でる あける おしえる おぼえる わすれる かりる あびる できる みせる つける はじめる つかれる しらべる かんがえる こたえる でかける あげる くれる かける おりる とめる きめる つづける ほめる まける うける いれる おちる すてる ならべる ふえる たてる あつめる にる のびる つとめる すぎる たりる とじる しんじる かんじる あきる おびる ほろびる こころみる かえりみる もちいる うえる おさえる かぞえる ささえる そだてる たすける ととのえる ながめる なげる にげる のせる はれる ふるえる まぜる みとめる むかえる もえる やせる ゆれる わける あたえる あわてる いじめる うまれる おくれる おさめる かくれる かためる きこえる くらべる こえる こわれる さめる しずめる せめる そえる たずねる ちかづける つたえる つめる とどける ぬれる のべる はなれる ひえる へだてる ほえる まちがえる みだれる むける めざめる もうける ゆでる よごれる わかれる おもんじる あまえる`.split(' ');
+const GO_RU = `わかる なる ある とる のる つくる おわる はじまる すわる おくる おこる まもる あがる さがる まがる ふる わたる かかる しまる とまる きまる あつまる ひかる がんばる かぶる くもる けずる ことわる さわる しかる しばる たまる つもる とおる なおる なぐる ねむる のこる のぼる はかる はる ひろがる ふさがる ほる まわる もぐる もどる もる やぶる ゆずる よる わる いのる うつる おどる かざる くばる さぐる しぼる せまる たよる ちぢまる つながる つまる にごる ぬる はやる ひたる`.split(' ');
+const GO_ETC = `かく きく いく あるく およぐ いそぐ はなす かす だす まつ もつ たつ しぬ あそぶ よぶ とぶ のむ よむ すむ やすむ かう あう いう つかう ならう うたう おもう わらう なく はたらく ひく おく さく ぬぐ さわぐ つぐ けす おす さがす なおす わたす うごかす かえす うつ かつ そだつ まなぶ ならぶ えらぶ はこぶ むすぶ よろこぶ つつむ たのむ すすむ かむ うむ ふむ ぬすむ おう ひろう すう あらう まよう ねがう かよう さそう ちがう`.split(' ');
+
+// ── 설정 ──
+const GAME_SEC = 120;
+const PTS = { hit:10, hitCombo:15, wrong:-5, miss:-3 }, COMBO_AT = 5;
+const FREEZE_SEC = 1;  // 잘못 쏘을 때 화면 정지 시간(타이머는 계속 감)
+const MAX_MISS = 15;   // 잘못 쏜 + 놓침 합계가 이 횟수에 이르면 종료
+const LAST_ENTRY_KEY = 'ichidan-shooter-last-entry'; // 폼 자동완성용(기기 저장, 랭킹 데이터 아님)
+
+const $ = id => document.getElementById(id);
+const field = $('field'), deadline = $('deadline');
+const screens = ['sStart','sCount','sResult','sRank'];
+const show = id => screens.forEach(s => $(s).hidden = s !== id);
+
+let S = null, raf = 0;
+
+function bag(arr){ let pool=[]; return () => { if(!pool.length){ pool=arr.slice(); for(let i=pool.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[pool[i],pool[j]]=[pool[j],pool[i]];} } return pool.pop(); }; }
+const pickI = bag(ICHI), pickR = bag(GO_RU), pickE = bag(GO_ETC);
+
+function pickWord(){
+  const r = Math.random();
+  if (r < .5) return { w:pickI(), ichi:true };
+  if (r < .8) return { w:pickR(), ichi:false };
+  return { w:pickE(), ichi:false };
+}
+
+// 진행도 0→1 에 따라 난이도 상승
+const spawnGap = p => 1.25 - .6*p;      // 초
+const fallSec  = p => 7.3 - 2.9*p;      // 화면을 다 내려오는 시간
+
+function start(){
+  field.querySelectorAll('.word,.float,.beam').forEach(n => n.remove());
+  S = { t:0, last:performance.now(), nextSpawn:.4, score:0, combo:0, freezeUntil:0, hit:0, wrong:0, miss:0,
+        wrongList:new Set(), missList:new Set(), words:[], lastLane:-1, running:true };
+  updHud();
+  show(null);
+  raf = requestAnimationFrame(loop);
+}
+
+function countdown(){
+  show('sCount'); let n = 3; $('countNum').textContent = n;
+  const iv = setInterval(() => { n--; if(n<=0){ clearInterval(iv); start(); } else $('countNum').textContent = n; }, 700);
+}
+
+function lanes(){ const w = field.clientWidth; return w < 520 ? 3 : w < 900 ? 4 : 5; }
+
+function spawn(){
+  const { w, ichi } = pickWord();
+  const el = document.createElement('div');
+  el.className = 'word'; el.textContent = w;
+  field.appendChild(el);
+  const fw = field.clientWidth, ew = el.offsetWidth, n = lanes();
+  let lane; do { lane = Math.random()*n|0; } while (n>1 && lane === S.lastLane);
+  S.lastLane = lane;
+  const laneW = fw / n;
+  const x = Math.max(6, Math.min(fw - ew - 6, lane*laneW + (laneW - ew)/2 + (Math.random()-.5)*laneW*.3));
+  const o = { el, w, ichi, x, y:-60, speed:0, dead:false };
+  o.speed = (field.clientHeight + 60) / fallSec(S.t/GAME_SEC);
+  el.style.transform = `translate(${x}px,-60px)`;
+  el.addEventListener('pointerdown', e => { e.preventDefault(); shoot(o); });
+  S.words.push(o);
+}
+
+function loop(now){
+  if(!S.running) return;
+  const dt = Math.min(.1, (now - S.last)/1000); S.last = now;
+  S.t += dt;
+  const p = Math.min(1, S.t/GAME_SEC);
+  const frozen = S.t < S.freezeUntil;
+  $('freeze').hidden = !frozen;
+  if (!frozen){
+    S.nextSpawn -= dt;
+    if (S.nextSpawn <= 0){ spawn(); S.nextSpawn = spawnGap(p); }
+  }
+  const limit = field.clientHeight - 64;
+  for (const o of S.words){
+    if (frozen) break;
+    if (o.dead) continue;
+    o.y += o.speed*dt;
+    o.el.style.transform = `translate(${o.x}px,${o.y}px)`;
+    if (o.y + o.el.offsetHeight > limit){
+      o.dead = true; o.el.remove();
+      if (o.ichi){ S.miss++; S.combo=0; S.missList.add(o.w); addScore(PTS.miss, o.x + o.el.offsetWidth/2, limit-30); flashLine(); missMsg(o.w); }
+    }
+    if (outOfLives()) return end('miss');
+  }
+  S.words = S.words.filter(o => !o.dead);
+  const left = Math.max(0, GAME_SEC - S.t);
+  const secs = Math.ceil(left);
+  $('time').textContent = `${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}`;
+  $('timeBox').classList.toggle('low', left <= 20);
+  if (left <= 0) return end('time');
+  raf = requestAnimationFrame(loop);
+}
+
+function shoot(o){
+  if (o.dead || !S.running || S.t < S.freezeUntil) return;
+  o.dead = true;
+  const cx = o.x + o.el.offsetWidth/2, cy = o.y + o.el.offsetHeight/2;
+  beam(cx, cy);
+  if (o.ichi){
+    S.hit++; S.combo++;
+    addScore(S.combo >= COMBO_AT ? PTS.hitCombo : PTS.hit, cx, cy);
+    o.el.classList.add('hit');
+  } else {
+    S.wrong++; S.combo = 0; S.wrongList.add(o.w);
+    S.freezeUntil = S.t + FREEZE_SEC;
+    addScore(PTS.wrong, cx, cy);
+    o.el.classList.add('wrong');
+  }
+  setTimeout(() => o.el.remove(), 300);
+  if (outOfLives()) setTimeout(() => S.running && end('miss'), 320);
+}
+
+function beam(x, y){
+  const sx = field.clientWidth/2, sy = field.clientHeight - 50;
+  const b = document.createElement('div'); b.className = 'beam';
+  const dx = x - sx, dy = y - sy;
+  b.style.left = sx+'px'; b.style.top = sy+'px';
+  b.style.width = Math.hypot(dx,dy)+'px';
+  b.style.transform = `rotate(${Math.atan2(dy,dx)}rad)`;
+  field.appendChild(b); setTimeout(() => b.remove(), 200);
+}
+
+function addScore(v, x, y){
+  S.score += v; updHud();
+  const f = document.createElement('div');
+  f.className = 'float ' + (v>0 ? 'plus' : 'minus');
+  f.textContent = (v>0?'+':'−') + Math.abs(v);
+  f.style.left = x+'px'; f.style.top = y+'px';
+  field.appendChild(f); setTimeout(() => f.remove(), 800);
+}
+let msgTimer = 0;
+function missMsg(w){
+  const box = $('missMsg'); $('missWord').textContent = w;
+  box.hidden = true; void box.offsetWidth; box.hidden = false;
+  clearTimeout(msgTimer); msgTimer = setTimeout(() => box.hidden = true, 1400);
+}
+function flashLine(){ deadline.classList.add('flash'); setTimeout(() => deadline.classList.remove('flash'), 250); }
+function outOfLives(){ return S.wrong + S.miss >= MAX_MISS; }
+function updHud(){
+  $('score').textContent = S.score; $('combo').textContent = S.combo;
+  const m = S.wrong + S.miss;
+  $('missCnt').textContent = `${Math.min(m, MAX_MISS)}/${MAX_MISS}`;
+  $('missBox').classList.toggle('warn', m >= MAX_MISS - 3);
+}
+
+function chips(box, set, wrap){
+  $(wrap).hidden = !set.size; $(box).innerHTML = '';
+  [...set].forEach(w => { const s=document.createElement('span'); s.textContent=w; $(box).appendChild(s); });
+}
+
+function end(reason){
+  if (!S.running) return;
+  S.running = false; cancelAnimationFrame(raf);
+  $('freeze').hidden = true; $('missMsg').hidden = true; clearTimeout(msgTimer);
+  $('rReason').textContent = reason === 'miss' ? `실수 ${MAX_MISS}번 · 게임 종료` : 'TIME UP · 결과';
+  S.words.forEach(o => o.el.remove()); S.words = [];
+  $('rScore').textContent = S.score;
+  $('rHit').textContent = S.hit; $('rWrong').textContent = S.wrong; $('rMiss').textContent = S.miss;
+  chips('listWrong', S.wrongList, 'reviewWrong');
+  chips('listMiss', S.missList, 'reviewMiss');
+  $('err').textContent = '';
+  try { const saved = JSON.parse(localStorage.getItem(LAST_ENTRY_KEY)||'null'); if(saved){ $('inId').value=saved.id; $('inName').value=saved.name; } } catch(e){}
+  show('sResult');
+}
+
+// ── 랭킹 (Firebase Firestore. 컬렉션 rankings, 문서 ID = 학번) ──
+async function loadRank(){
+  const q = query(collection(db, 'rankings'), orderBy('score', 'desc'), limit(10));
+  const snap = await getDocs(q);
+  return snap.docs.map(d => d.data());
+}
+
+function wait(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function saveRank(entry){
+  const ref = doc(db, 'rankings', entry.id);
+  const attempts = 3; // 최초 시도 1회 + 자동 재시도 2회
+  let lastErr;
+  for (let i = 0; i < attempts; i++){
+    try {
+      await runTransaction(db, async tx => {
+        const snap = await tx.get(ref);
+        if (!snap.exists() || entry.score > snap.data().score){
+          tx.set(ref, { id: entry.id, name: entry.name, score: entry.score, at: entry.at });
+        }
+      });
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) await wait(500 * (i + 1));
+    }
+  }
+  throw lastErr;
+}
+
+let myId = null;
+async function renderRank(){
+  const body = $('rankBody');
+  body.innerHTML = '<tr><td colspan="4" class="empty">불러오는 중…</td></tr>';
+  let list;
+  try { list = await loadRank(); }
+  catch (e){ body.innerHTML = '<tr><td colspan="4" class="empty">랭킹을 불러오지 못했습니다. 네트워크를 확인해 주세요.</td></tr>'; return; }
+  body.innerHTML = '';
+  if (!list.length){ body.innerHTML = '<tr><td colspan="4" class="empty">아직 등록된 기록이 없습니다.</td></tr>'; return; }
+  list.forEach((r,i) => {
+    const tr = document.createElement('tr');
+    if (i===0) tr.classList.add('top1');
+    if (r.id === myId) tr.classList.add('me');
+    tr.innerHTML = `<td class="rk">${i+1}</td><td></td><td></td><td class="sc">${r.score}</td>`;
+    tr.children[1].textContent = r.id; tr.children[2].textContent = r.name;
+    body.appendChild(tr);
+  });
+}
+
+$('saveForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const id = $('inId').value.trim(), name = $('inName').value.trim();
+  if (!/^\d{4}$/.test(id)) { $('err').textContent = '학번은 숫자 4자리로 입력하세요. (예: 2601)'; $('inId').focus(); return; }
+  if (!/^[가-힣a-zA-Z ]{2,10}$/.test(name)) { $('err').textContent = '이름을 2~10자로 입력하세요.'; $('inName').focus(); return; }
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled = true; $('err').textContent = '저장 중…';
+  try {
+    await saveRank({ id, name, score:S.score, at:Date.now() });
+    try { localStorage.setItem(LAST_ENTRY_KEY, JSON.stringify({id,name})); } catch(err){}
+    myId = id; document.activeElement.blur(); $('err').textContent = '';
+    show('sRank'); renderRank();
+  } catch (err) {
+    $('err').textContent = '저장에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해 주세요.';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('btnStart').addEventListener('click', countdown);
+$('btnAgain').addEventListener('click', countdown);
+$('btnHome').addEventListener('click', () => show('sStart'));
+$('btnRankFromStart').addEventListener('click', () => { myId = null; show('sRank'); renderRank(); });
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+})();
+</script>
